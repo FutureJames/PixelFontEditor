@@ -1,0 +1,78 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run Pixel Font Editor",
+			"type": "shell",
+			"command": "python3",
+			"args": [
+				"main.py"
+			],
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Build Pixel Font Editor (macOS)",
+			"type": "shell",
+			"command": "python3",
+			"args": [
+				"-m",
+				"PyInstaller",
+				"--noconfirm",
+				"--clean",
+				"--windowed",
+				"--name",
+				"PixelFontEditor",
+				"--icon",
+				"assets/pixel_font_editor.icns",
+				"--add-data",
+				"assets:assets",
+				"main.py"
+			],
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Build Pixel Font Editor (Windows)",
+			"type": "shell",
+			"command": "py",
+			"args": [
+				"-m",
+				"PyInstaller",
+				"--noconfirm",
+				"--clean",
+				"--onefile",
+				"--windowed",
+				"--name",
+				"PixelFontEditor",
+				"--icon",
+				"assets/pixel_font_editor.ico",
+				"--add-data",
+				"assets;assets",
+				"main.py"
+			],
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Run Unit Tests",
+			"type": "shell",
+			"command": "python3",
+			"windows": {
+				"command": "py"
+			},
+			"args": [
+				"-m",
+				"unittest",
+				"discover",
+				"-s",
+				"tests",
+				"-t",
+				"."
+			],
+			"problemMatcher": [],
+			"group": "test"
+		}
+	]
+}
