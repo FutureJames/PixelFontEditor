@@ -13,6 +13,16 @@
 			"group": "build"
 		},
 		{
+			"label": "Generate App Icons",
+			"type": "shell",
+			"command": "python3",
+			"args": [
+				"tools/generate_icons.py"
+			],
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
 			"label": "Build Pixel Font Editor (macOS)",
 			"type": "shell",
 			"command": "python3",
