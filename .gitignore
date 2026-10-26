@@ -2,6 +2,6 @@ __pycache__/
 *.py[cod]
 .venv/
 .DS_Store
-.github/copilot-instructions.md
+.github/
 build/
 dist/
