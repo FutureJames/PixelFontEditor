@@ -1039,6 +1039,32 @@ class PixelFontEditor:
 
 
 def run() -> None:
+    if sys.platform == "win32":
+        import ctypes
+
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        try:
+            set_dpi_awareness_context = user32.SetProcessDpiAwarenessContext
+        except AttributeError:
+            set_dpi_awareness_context = None
+        if set_dpi_awareness_context is not None:
+            set_dpi_awareness_context.argtypes = [ctypes.c_void_p]
+            set_dpi_awareness_context.restype = ctypes.c_bool
+            if not set_dpi_awareness_context(ctypes.c_void_p(-4)):
+                set_dpi_awareness_context = None
+
+        if set_dpi_awareness_context is None:
+            try:
+                shcore = ctypes.WinDLL("shcore", use_last_error=True)
+                set_process_dpi_awareness = shcore.SetProcessDpiAwareness
+            except (AttributeError, OSError):
+                user32.SetProcessDPIAware()
+            else:
+                set_process_dpi_awareness.argtypes = [ctypes.c_int]
+                set_process_dpi_awareness.restype = ctypes.c_long
+                if set_process_dpi_awareness(2) != 0:
+                    user32.SetProcessDPIAware()
+
     root = tk.Tk()
     PixelFontEditor(root)
     root.mainloop()
