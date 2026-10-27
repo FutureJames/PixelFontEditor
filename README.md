@@ -16,7 +16,15 @@ The editor opens with an 8x10 grid, a blank glyph, and a sample diamond. Click o
 
 Set the width and height to set the glyph size. Pixels that still fit are preserved. The live preview has an adjustable zoom, and the row-data panel shows the selected glyph as binary values. Both the preview and font atlas update as you edit.
 
-Use **Open .c** to load a font in the editor's supported `font_t` initializer format. The bundled [5x10](sample_files/font_5x10.c) and [8x10](sample_files/font_8x10.c) fonts are ready to open. Any file header text before the initializer, such as comments and `#include` directives, is retained when you save. Set the C symbol name at the top of the window, then choose **Save .c** to export the font.
+Use the **Open Font** button to load either a VT100 `font_t` initializer or a U8g2 C font array. 
+
+U8g2 bitmaps are padded to the font's maximum glyph dimensions to fit the shared editor grid. Original code points, bitmap sizes, and U8g2 offsets are kept in each glyph's description, but spacing and offsets are not applied in the editor preview or its VT100 export. 
+
+To **Export** the current font, set the C symbol name at the top of the window, click the **Save** button and select **VT100 font** or **U8g2 font** in the dialog. The default format will be whatever file format was most recently opened (probably what you are currently working on).
+
+Header text before the initializer, such as comments and `#include` directives, is retained when you save. 
+
+*Note: Fonts created in the editor without U8g2 metadata are assigned code points starting at U+0020.*
 
 ## Requirements
 

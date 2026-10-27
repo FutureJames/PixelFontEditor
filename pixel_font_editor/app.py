@@ -7,6 +7,8 @@ from tkinter import filedialog, messagebox, ttk
 
 from pixel_font_editor.c_export import extract_c_header, parse_c_font, render_c_font
 from pixel_font_editor.model import Glyph, MAX_DIMENSION
+from pixel_font_editor.u8g2_export import render_u8g2_font
+from pixel_font_editor.u8g2_import import parse_u8g2_font_with_metadata
 
 
 ASSET_DIR = Path(__file__).resolve().parent.parent / "assets"
@@ -48,6 +50,8 @@ class PixelFontEditor:
         self.selected_index = 0
         self.name_var = tk.StringVar(value="font_8x10")
         self.file_header = ""
+        self.u8g2_header: bytes | None = None
+        self.default_save_format = "VT100 font"
         self.width_var = tk.IntVar(value=self.width)
         self.height_var = tk.IntVar(value=self.height)
         self.glyph_description_var = tk.StringVar()
@@ -118,10 +122,10 @@ class PixelFontEditor:
         ttk.Entry(export_area, textvariable=self.name_var, width=20).grid(
             row=1, column=0, padx=(0, 10), sticky="ew"
         )
-        ttk.Button(export_area, text="Open .c", command=self._open).grid(
+        ttk.Button(export_area, text="Open Font", command=self._open).grid(
             row=1, column=1, sticky="e", padx=(0, 6)
         )
-        ttk.Button(export_area, text="Save .c", command=self._export).grid(
+        ttk.Button(export_area, text="Save", command=self._save).grid(
             row=1, column=2, sticky="e"
         )
 
@@ -736,22 +740,34 @@ class PixelFontEditor:
 
     def _open(self) -> None:
         path = filedialog.askopenfilename(
-            title="Open C font",
-            filetypes=[("C source", "*.c"), ("All files", "*.*")],
+            title="Open Font",
+            filetypes=[("VT100 font", "*.c"), ("U8g2 font", "*.c"), ("All files", "*.*")],
         )
         if not path:
             return
         try:
             with open(path, "r", encoding="utf-8") as file:
                 source = file.read()
-            name, glyphs = parse_c_font(source)
-            file_header = extract_c_header(source)
+            try:
+                name, glyphs = parse_c_font(source)
+                file_header = extract_c_header(source)
+                u8g2_header = None
+                default_save_format = "VT100 font"
+            except ValueError as c_error:
+                try:
+                    name, glyphs, u8g2_header = parse_u8g2_font_with_metadata(source)
+                    file_header = ""
+                    default_save_format = "U8g2 font"
+                except ValueError as u8g2_error:
+                    raise ValueError(f"{c_error}\n\n{u8g2_error}") from u8g2_error
         except (OSError, ValueError) as error:
             messagebox.showerror("Could not open font", str(error), parent=self.root)
             return
 
         self.name_var.set(name)
         self.file_header = file_header
+        self.u8g2_header = u8g2_header
+        self.default_save_format = default_save_format
         self.glyphs = glyphs
         self.width = glyphs[0].width
         self.height = glyphs[0].height
@@ -761,22 +777,31 @@ class PixelFontEditor:
         self._refresh()
         self.status_var.set(f"Opened {len(glyphs)} glyphs from {path}")
 
-    def _export(self) -> None:
+    def _save(self) -> None:
         suggested_name = self.name_var.get().strip() or "font"
+        selected_format = tk.StringVar(value=self.default_save_format)
         path = filedialog.asksaveasfilename(
-            title="Export C font",
+            title="Save Font",
             defaultextension=".c",
             initialfile=f"{suggested_name}.c",
-            filetypes=[("C source", "*.c"), ("All files", "*.*")],
+            filetypes=[("VT100 font", "*.c"), ("U8g2 font", "*.c")],
+            typevariable=selected_format,
         )
         if not path:
             return
         try:
-            output = render_c_font(
-                suggested_name,
-                self.glyphs,
-                header=self.file_header,
-            )
+            if selected_format.get() == "U8g2 font":
+                output = render_u8g2_font(
+                    suggested_name,
+                    self.glyphs,
+                    font_header=self.u8g2_header,
+                )
+            else:
+                output = render_c_font(
+                    suggested_name,
+                    self.glyphs,
+                    header=self.file_header,
+                )
             with open(path, "w", encoding="utf-8", newline="\n") as file:
                 file.write(output)
         except (OSError, ValueError) as error:
