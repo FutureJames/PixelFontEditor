@@ -5,6 +5,9 @@
 			"label": "Run Pixel Font Editor",
 			"type": "shell",
 			"command": "python3",
+			"windows": {
+				"command": "py"
+			},
 			"args": [
 				"main.py"
 			],
@@ -16,6 +19,9 @@
 			"label": "Generate App Icons",
 			"type": "shell",
 			"command": "python3",
+			"windows": {
+				"command": "py"
+			},
 			"args": [
 				"tools/generate_icons.py"
 			],
@@ -26,6 +32,9 @@
 			"label": "Build Pixel Font Editor (macOS)",
 			"type": "shell",
 			"command": "python3",
+			"windows": {
+				"command": "py"
+			},
 			"args": [
 				"-m",
 				"PyInstaller",
@@ -48,7 +57,10 @@
 		{
 			"label": "Build Pixel Font Editor (Windows)",
 			"type": "shell",
-			"command": "py",
+			"command": "python3",
+			"windows": {
+				"command": "py"
+			},
 			"args": [
 				"-m",
 				"PyInstaller",
@@ -61,9 +73,15 @@
 				"--icon",
 				"assets/pixel_font_editor.ico",
 				"--add-data",
-				"assets;assets",
+				{
+					"value": "assets;assets",
+					"quoting": "strong"
+				},
 				"--add-data",
-				"template_files;template_files",
+				{
+					"value": "template_files;template_files",
+					"quoting": "strong"
+				},
 				"main.py"
 			],
 			"problemMatcher": [],
