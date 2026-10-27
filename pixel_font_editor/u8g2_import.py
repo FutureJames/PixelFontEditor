@@ -101,6 +101,14 @@ def _extract_font_array(source: str) -> tuple[str, bytes]:
     return declaration.group(1), data
 
 
+def extract_u8g2_c_header(source: str) -> str:
+    """Return all source text before the U8g2 font array declaration."""
+    declaration = FONT_ARRAY.search(source)
+    if declaration is None:
+        raise ValueError("no U8g2 font string array was found")
+    return source[: declaration.start()]
+
+
 def _decode_glyph(
     data: bytes,
     glyph_offset: int,

@@ -8,10 +8,93 @@ from tkinter import filedialog, messagebox, ttk
 from pixel_font_editor.c_export import extract_c_header, parse_c_font, render_c_font
 from pixel_font_editor.model import Glyph, MAX_DIMENSION
 from pixel_font_editor.u8g2_export import render_u8g2_font
-from pixel_font_editor.u8g2_import import parse_u8g2_font_with_metadata
+from pixel_font_editor.u8g2_import import (
+    extract_u8g2_c_header,
+    parse_u8g2_font_with_metadata,
+)
 
 
-ASSET_DIR = Path(__file__).resolve().parent.parent / "assets"
+RESOURCE_DIR = Path(
+    getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent)
+)
+ASSET_DIR = RESOURCE_DIR / "assets"
+TEMPLATE_DIR = RESOURCE_DIR / "template_files"
+SAMPLE_TEXT = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation."
+
+
+def _default_glyphs(width: int, height: int) -> list[Glyph]:
+    return [
+        Glyph(width, height),
+        Glyph(
+            width,
+            height,
+            [
+                0b00010000,
+                0b00111000,
+                0b01111100,
+                0b11111110,
+                0b01111100,
+                0b00111000,
+                0b00010000,
+                0,
+                0,
+                0,
+            ],
+        ),
+    ]
+
+
+def _glyph_index_for_character(
+    glyphs: list[Glyph], character: str, font_format: str
+) -> int | None:
+    codepoint = ord(character)
+    if font_format != "U8g2 font":
+        return codepoint if codepoint < len(glyphs) else None
+
+    for index, glyph in enumerate(glyphs):
+        description_parts = glyph.description.split(maxsplit=1)
+        if not description_parts:
+            continue
+        codepoint_text = description_parts[0]
+        if not codepoint_text.startswith("U+"):
+            continue
+        try:
+            if int(codepoint_text[2:], 16) == codepoint:
+                return index
+        except ValueError:
+            continue
+    return None
+
+
+def _wrap_sample_text(text: str, max_characters: int) -> list[str]:
+    lines = []
+    current_line = ""
+    for word in text.split():
+        if current_line and len(current_line) + 1 + len(word) > max_characters:
+            lines.append(current_line)
+            current_line = word
+        elif current_line:
+            current_line += f" {word}"
+        else:
+            current_line = word
+    if current_line:
+        lines.append(current_line)
+    return lines
+
+
+def _preview_pixel_scale(
+    glyph_width: int,
+    glyph_height: int,
+    canvas_width: int,
+    canvas_height: int,
+    zoom: float,
+) -> int:
+    fit_cell = max(
+        3,
+        min(22, (canvas_width - 20) // glyph_width,
+            (canvas_height - 20) // glyph_height),
+    )
+    return max(1, round(fit_cell * zoom))
 
 
 class PixelFontEditor:
@@ -28,25 +111,7 @@ class PixelFontEditor:
 
         self.width = 8
         self.height = 10
-        self.glyphs = [
-            Glyph(self.width, self.height),
-            Glyph(
-                self.width,
-                self.height,
-                [
-                    0b00010000,
-                    0b00111000,
-                    0b01111100,
-                    0b11111110,
-                    0b01111100,
-                    0b00111000,
-                    0b00010000,
-                    0,
-                    0,
-                    0,
-                ],
-            ),
-        ]
+        self.glyphs = _default_glyphs(self.width, self.height)
         self.selected_index = 0
         self.name_var = tk.StringVar(value="font_8x10")
         self.file_header = ""
@@ -60,11 +125,13 @@ class PixelFontEditor:
         self._last_painted_cell: tuple[int, int] | None = None
         self.preview_zoom = tk.DoubleVar(value=0.3)
         self.preview_zoom_label = tk.StringVar(value="0.3x")
+        self.sample_text_var = tk.StringVar(value=SAMPLE_TEXT)
         self.status_var = tk.StringVar()
 
         self._configure_styles()
         self._build_layout()
         self.glyph_description_var.trace_add("write", self._description_changed)
+        self.sample_text_var.trace_add("write", self._sample_text_changed)
         self._refresh()
 
     def _configure_styles(self) -> None:
@@ -122,11 +189,14 @@ class PixelFontEditor:
         ttk.Entry(export_area, textvariable=self.name_var, width=20).grid(
             row=1, column=0, padx=(0, 10), sticky="ew"
         )
-        ttk.Button(export_area, text="Open Font", command=self._open).grid(
+        ttk.Button(export_area, text="New", command=self._new).grid(
             row=1, column=1, sticky="e", padx=(0, 6)
         )
+        ttk.Button(export_area, text="Open", command=self._open).grid(
+            row=1, column=2, sticky="e", padx=(0, 6)
+        )
         ttk.Button(export_area, text="Save", command=self._save).grid(
-            row=1, column=2, sticky="e"
+            row=1, column=3, sticky="e"
         )
 
         ttk.Separator(shell).grid(row=1, column=0, sticky="ew", pady=(0, 14))
@@ -342,23 +412,38 @@ class PixelFontEditor:
             yscrollcommand=preview_vertical.set,
         )
 
-        ttk.Label(panel, text="ROW DATA", style="PanelTitle.TLabel").grid(
+        ttk.Label(panel, text="FONT SAMPLE", style="PanelTitle.TLabel").grid(
             row=3, column=0, sticky="w", pady=(12, 7)
         )
-        self.row_data = tk.Text(
-            panel,
-            width=18,
-            height=8,
+        sample_frame = ttk.Frame(panel, style="Panel.TFrame")
+        sample_frame.grid(row=4, column=0, sticky="nsew")
+        sample_frame.grid_rowconfigure(0, weight=1)
+        sample_frame.grid_columnconfigure(0, weight=1)
+        self.sample_canvas = tk.Canvas(
+            sample_frame,
+            width=215,
+            height=135,
             background="#e9eee7",
-            foreground="#26423c",
-            font=("Menlo", 10),
-            borderwidth=0,
             highlightthickness=0,
-            padx=10,
-            pady=8,
-            state="disabled",
+            borderwidth=0,
         )
-        self.row_data.grid(row=4, column=0, sticky="ew")
+        self.sample_canvas.grid(row=0, column=0, sticky="nsew")
+        self.sample_canvas.bind("<Configure>", self._sample_canvas_resized)
+        sample_horizontal = ttk.Scrollbar(
+            sample_frame, orient="horizontal", command=self.sample_canvas.xview
+        )
+        sample_horizontal.grid(row=1, column=0, sticky="ew")
+        sample_scrollbar = ttk.Scrollbar(
+            sample_frame, orient="vertical", command=self.sample_canvas.yview
+        )
+        sample_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.sample_canvas.configure(
+            xscrollcommand=sample_horizontal.set,
+            yscrollcommand=sample_scrollbar.set,
+        )
+        ttk.Entry(panel, textvariable=self.sample_text_var).grid(
+            row=5, column=0, sticky="ew", pady=(8, 0)
+        )
 
     def _build_glyph_atlas_panel(self, parent: ttk.Frame) -> None:
         panel = ttk.Frame(parent, style="Panel.TFrame", padding=12)
@@ -408,8 +493,8 @@ class PixelFontEditor:
         self._syncing_glyph_description = False
         self._draw_grid()
         self._draw_preview()
+        self._draw_sample_text()
         self._draw_glyph_atlas()
-        self._refresh_row_data()
         lit_pixels = sum(row.bit_count() for row in self.selected_glyph.rows) # type: ignore
         self.status_var.set(
             f"GLYPH 0x{self.selected_index:02X}   /   {len(self.glyphs):02d} TOTAL"
@@ -430,6 +515,7 @@ class PixelFontEditor:
         self.glyph_list.selection_set(self.selected_index)
         self.glyph_list.activate(self.selected_index)
         self.glyph_list.see(self.selected_index)
+        self._draw_sample_text()
 
     def _glyph_list_label(self, index: int) -> str:
         description = " ".join(self.glyphs[index].description.split())
@@ -468,9 +554,13 @@ class PixelFontEditor:
         self.preview_canvas.delete("all")
         canvas_width = max(1, self.preview_canvas.winfo_width())
         canvas_height = max(1, self.preview_canvas.winfo_height())
-        fit_cell = max(3, min(22, (canvas_width - 20) // glyph.width,
-                              (canvas_height - 20) // glyph.height))
-        cell = max(2, round(fit_cell * self.preview_zoom.get()))
+        cell = _preview_pixel_scale(
+            glyph.width,
+            glyph.height,
+            canvas_width,
+            canvas_height,
+            self.preview_zoom.get(),
+        )
         content_width = glyph.width * cell
         content_height = glyph.height * cell
         scene_width = max(canvas_width, content_width)
@@ -605,14 +695,58 @@ class PixelFontEditor:
     def _preview_canvas_resized(self, _event: tk.Event) -> None:
         self._draw_preview()
 
-    def _refresh_row_data(self) -> None:
-        content = "\n".join(
-            f"0b{row:0{self.width}b}" for row in self.selected_glyph.rows # type: ignore
+    def _sample_canvas_resized(self, _event: tk.Event) -> None:
+        self._draw_sample_text()
+
+    def _sample_text_changed(self, *_args: str) -> None:
+        self._draw_sample_text()
+
+    def _draw_sample_text(self) -> None:
+        canvas = self.sample_canvas
+        sample_text = self.sample_text_var.get()
+        canvas.delete("all")
+        canvas_width = max(1, canvas.winfo_width())
+        canvas_height = max(1, canvas.winfo_height())
+        padding = 8
+        available_width = max(1, canvas_width - 2 * padding)
+
+        scale = 1
+        advance = (self.width + 1) * scale
+        line_height = (self.height + 2) * scale
+        characters_per_line = max(1, available_width // advance)
+        lines = _wrap_sample_text(sample_text, characters_per_line)
+        line_count = len(lines)
+        widest_line = max((len(line) for line in lines), default=0)
+        scene_width = max(
+            canvas_width,
+            2 * padding + widest_line * advance,
         )
-        self.row_data.configure(state="normal")
-        self.row_data.delete("1.0", tk.END)
-        self.row_data.insert("1.0", content)
-        self.row_data.configure(state="disabled")
+        scene_height = max(canvas_height, 2 * padding + line_count * line_height)
+        canvas.configure(scrollregion=(0, 0, scene_width, scene_height))
+
+        for line_index, line_text in enumerate(lines):
+            for column, character in enumerate(line_text):
+                glyph_index = _glyph_index_for_character(
+                    self.glyphs, character, self.default_save_format
+                )
+                if glyph_index is None:
+                    continue
+                glyph = self.glyphs[glyph_index]
+                left = padding + column * advance
+                top = padding + line_index * line_height
+                for y, row in enumerate(glyph.rows):  # type: ignore
+                    for x in range(glyph.width):
+                        if row & (1 << (glyph.width - 1 - x)):
+                            x0 = left + x * scale
+                            y0 = top + y * scale
+                            canvas.create_rectangle(
+                                x0,
+                                y0,
+                                x0 + scale,
+                                y0 + scale,
+                                fill="#df704d",
+                                outline="",
+                            )
 
     def _grid_cell_at(self, event: tk.Event) -> tuple[int, int] | None:
         cell = min(42, max(16, 520 // max(self.width, self.height)))
@@ -738,6 +872,78 @@ class PixelFontEditor:
             glyph.resize(width, height)
         self._refresh()
 
+    def _choose_new_format(self) -> str | None:
+        dialog = tk.Toplevel(self.root)
+        dialog.title("New Font")
+        dialog.transient(self.root)
+        dialog.resizable(False, False)
+
+        selected_format = tk.StringVar(value="VT100")
+        result: list[str | None] = [None]
+
+        ttk.Label(dialog, text="Choose a font format:").grid(
+            row=0, column=0, columnspan=2, sticky="w", padx=16, pady=(16, 8)
+        )
+        ttk.Radiobutton(
+            dialog, text="VT100", variable=selected_format, value="VT100"
+        ).grid(row=1, column=0, sticky="w", padx=16, pady=4)
+        ttk.Radiobutton(
+            dialog, text="u8g2", variable=selected_format, value="u8g2"
+        ).grid(row=2, column=0, sticky="w", padx=16, pady=4)
+        ttk.Radiobutton(
+            dialog, text="Blank", variable=selected_format, value="Blank"
+        ).grid(row=3, column=0, sticky="w", padx=16, pady=4)
+
+        buttons = ttk.Frame(dialog)
+        buttons.grid(row=4, column=0, columnspan=2, sticky="e", padx=16, pady=16)
+
+        def finish(choice: str | None = None) -> None:
+            result[0] = choice
+            dialog.destroy()
+
+        ttk.Button(buttons, text="Cancel", command=finish).grid(
+            row=0, column=0, padx=(0, 6)
+        )
+        ttk.Button(
+            buttons,
+            text="Create",
+            command=lambda: finish(selected_format.get()),
+        ).grid(row=0, column=1)
+        dialog.protocol("WM_DELETE_WINDOW", finish)
+        dialog.bind("<Escape>", lambda _event: finish())
+        dialog.bind("<Return>", lambda _event: finish(selected_format.get()))
+        dialog.wait_visibility()
+        dialog.grab_set()
+        self.root.wait_window(dialog)
+        return result[0]
+
+    def _new(self) -> None:
+        selected_format = self._choose_new_format()
+        if selected_format is None:
+            return
+        if selected_format == "Blank":
+            self._new_blank_font()
+            return
+        sample_name = {
+            "VT100": "font_8x10.c",
+            "u8g2": "u8g2_font_5x8_mr.c",
+        }[selected_format]
+        self._load_font(str(TEMPLATE_DIR / sample_name))
+
+    def _new_blank_font(self) -> None:
+        self.width = 8
+        self.height = 10
+        self.glyphs = _default_glyphs(self.width, self.height)
+        self.selected_index = 0
+        self.name_var.set("font_8x10")
+        self.file_header = ""
+        self.u8g2_header = None
+        self.default_save_format = "VT100 font"
+        self.width_var.set(self.width)
+        self.height_var.set(self.height)
+        self._refresh()
+        self.status_var.set("Created blank font")
+
     def _open(self) -> None:
         path = filedialog.askopenfilename(
             title="Open Font",
@@ -745,6 +951,9 @@ class PixelFontEditor:
         )
         if not path:
             return
+        self._load_font(path)
+
+    def _load_font(self, path: str) -> None:
         try:
             with open(path, "r", encoding="utf-8") as file:
                 source = file.read()
@@ -756,7 +965,7 @@ class PixelFontEditor:
             except ValueError as c_error:
                 try:
                     name, glyphs, u8g2_header = parse_u8g2_font_with_metadata(source)
-                    file_header = ""
+                    file_header = extract_u8g2_c_header(source)
                     default_save_format = "U8g2 font"
                 except ValueError as u8g2_error:
                     raise ValueError(f"{c_error}\n\n{u8g2_error}") from u8g2_error
@@ -789,12 +998,31 @@ class PixelFontEditor:
         )
         if not path:
             return
+        protected_paths = (
+            TEMPLATE_DIR / "font_8x10.c",
+            TEMPLATE_DIR / "u8g2_font_5x8_mr.c",
+        )
+        target_path = Path(path)
+        try:
+            is_protected = any(target_path.samefile(starter) for starter in protected_paths)
+        except OSError:
+            is_protected = target_path.resolve() in {
+                starter.resolve() for starter in protected_paths
+            }
+        if is_protected:
+            messagebox.showerror(
+                "Protected starter file",
+                "Starter files cannot be overwritten. Choose another location to save a copy.",
+                parent=self.root,
+            )
+            return
         try:
             if selected_format.get() == "U8g2 font":
                 output = render_u8g2_font(
                     suggested_name,
                     self.glyphs,
                     font_header=self.u8g2_header,
+                    source_header=self.file_header,
                 )
             else:
                 output = render_c_font(

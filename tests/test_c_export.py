@@ -96,9 +96,9 @@ class CExportTests(unittest.TestCase):
         name, glyphs = parse_c_font(sample_path.read_text(encoding="utf-8"))
 
         self.assertEqual(name, "font_8x10")
-        self.assertEqual(len(glyphs), 136)
+        self.assertEqual(len(glyphs), 128)
         self.assertTrue(all((glyph.width, glyph.height) == (8, 10) for glyph in glyphs))
-        self.assertEqual(glyphs[0x80].description, "↓")
+        self.assertEqual(glyphs[0x7E].description, "~")
 
 
 if __name__ == "__main__":

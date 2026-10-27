@@ -14,9 +14,9 @@ Start the application by double clicking the packaged executable for your platfo
 
 The editor opens with an 8x10 grid, a blank glyph, and a sample diamond. Click or drag across grid cells to turn pixels on or off. Choose a glyph from the list or the font atlas; the atlas is arranged in 16 columns and uses hexadecimal indices. Remove glyphs with the button below the list.  The "+Add" button will create a new blank glyph at the bottom of the list. The selected glyph's description can be edited in the text box above the pixel grid.  This description is only for convinence when editing and will be stored as a comment in the file when exporting/saving.
 
-Set the width and height to set the glyph size. Pixels that still fit are preserved. The live preview has an adjustable zoom, and the row-data panel shows the selected glyph as binary values. Both the preview and font atlas update as you edit.
+Set the width and height to set the glyph size. Pixels that still fit are preserved. The live preview renders some sample text using the current font. Edit the text in the field below the sample to preview different characters. The preview, sample, and font atlas update as you edit.
 
-Use the **Open Font** button to load either a VT100 `font_t` initializer or a U8g2 C font array. 
+Use the **Open** button to load either a VT100 `font_t` initializer or a U8g2 C font array. 
 
 U8g2 bitmaps are padded to the font's maximum glyph dimensions to fit the shared editor grid. Original code points, bitmap sizes, and U8g2 offsets are kept in each glyph's description, but spacing and offsets are not applied in the editor preview or its VT100 export. 
 

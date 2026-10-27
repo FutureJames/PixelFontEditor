@@ -198,6 +198,7 @@ def render_u8g2_font(
     glyphs: list[Glyph],
     font_header: bytes | None = None,
     rle_widths: tuple[int, int] | None = None,
+    source_header: str = "",
 ) -> str:
     """Render glyphs as a U8g2 C font array."""
     if not glyphs:
@@ -337,4 +338,6 @@ def render_u8g2_font(
         )
         lines.append(f'  "{encoded}"')
     lines[-1] += ";"
-    return "\n".join(lines) + "\n"
+    if source_header and not source_header.endswith(("\n", "\r")):
+        source_header += "\n"
+    return source_header + "\n".join(lines) + "\n"

@@ -5,6 +5,7 @@ from pixel_font_editor.model import Glyph
 from pixel_font_editor.u8g2_export import render_u8g2_font
 from pixel_font_editor.u8g2_import import (
     _extract_font_array,
+    extract_u8g2_c_header,
     parse_u8g2_font,
     parse_u8g2_font_with_metadata,
 )
@@ -110,6 +111,22 @@ class U8g2ImportTests(unittest.TestCase):
             [(glyph.description, glyph.rows) for glyph in exported_data[1]],
             [(glyph.description, glyph.rows) for glyph in glyphs],
         )
+
+    def test_round_trips_source_header_and_comments(self):
+        sample_path = Path(__file__).parents[1] / "sample_files" / "u8g2_font_5x8_mr.c"
+        source = sample_path.read_text(encoding="utf-8")
+        header = extract_u8g2_c_header(source)
+        name, glyphs, font_header = parse_u8g2_font_with_metadata(source)
+
+        exported = render_u8g2_font(
+            name,
+            glyphs,
+            font_header=font_header,
+            source_header=header,
+        )
+
+        self.assertTrue(exported.startswith(header))
+        self.assertEqual(extract_u8g2_c_header(exported), header)
 
     def test_round_trips_extended_unicode_glyphs(self):
         glyphs = [

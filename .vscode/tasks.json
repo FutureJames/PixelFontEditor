@@ -38,6 +38,8 @@
 				"assets/pixel_font_editor.icns",
 				"--add-data",
 				"assets:assets",
+				"--add-data",
+				"template_files:template_files",
 				"main.py"
 			],
 			"problemMatcher": [],
@@ -60,6 +62,8 @@
 				"assets/pixel_font_editor.ico",
 				"--add-data",
 				"assets;assets",
+				"--add-data",
+				"template_files;template_files",
 				"main.py"
 			],
 			"problemMatcher": [],
