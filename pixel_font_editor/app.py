@@ -1,6 +1,8 @@
 """Tkinter interface for drawing and exporting bitmap fonts."""
 
 from pathlib import Path
+import json
+import re
 import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -19,7 +21,39 @@ RESOURCE_DIR = Path(
 )
 ASSET_DIR = RESOURCE_DIR / "assets"
 TEMPLATE_DIR = RESOURCE_DIR / "template_files"
+CONFIG_PATH = (
+    Path(sys.executable).resolve().parent / "config.json"
+    if getattr(sys, "frozen", False)
+    else Path(__file__).resolve().parent.parent / "config.json"
+)
+DEFAULT_WINDOW_SIZE = (1380, 780)
+DEFAULT_MIN_WINDOW_SIZE = (1260, 640)
 SAMPLE_TEXT = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation."
+UNICODE_CODEPOINT = re.compile(r"^U\+([0-9A-Fa-f]{1,6})(?:\s|$)")
+
+
+def _load_window_config(config_path: Path) -> tuple[tuple[int, int], tuple[int, int]]:
+    try:
+        window_config = json.loads(config_path.read_text(encoding="utf-8")).get(
+            "window", {}
+        )
+    except FileNotFoundError:
+        return DEFAULT_WINDOW_SIZE, DEFAULT_MIN_WINDOW_SIZE
+
+    if not isinstance(window_config, dict):
+        raise ValueError("The 'window' configuration must be an object")
+
+    window_size = (
+        window_config.get("width", DEFAULT_WINDOW_SIZE[0]),
+        window_config.get("height", DEFAULT_WINDOW_SIZE[1]),
+    )
+    min_window_size = (
+        window_config.get("min_width", DEFAULT_MIN_WINDOW_SIZE[0]),
+        window_config.get("min_height", DEFAULT_MIN_WINDOW_SIZE[1]),
+    )
+    if any(type(value) is not int or value <= 0 for value in (*window_size, *min_window_size)):
+        raise ValueError("Window dimensions must be positive integers")
+    return window_size, min_window_size
 
 
 def _default_glyphs(width: int, height: int) -> list[Glyph]:
@@ -66,6 +100,25 @@ def _glyph_index_for_character(
     return None
 
 
+def _render_unicode_glyphs(glyphs: list[Glyph]) -> str:
+    lines = ["const font_unicode_glyph_t font_unicode_glyphs[] = {"]
+    for index, glyph in enumerate(glyphs[0x80:], start=0x80):
+        description = glyph.description.strip()
+        match = UNICODE_CODEPOINT.match(description)
+        if match is not None:
+            codepoint = int(match.group(1), 16)
+        elif len(description) == 1:
+            codepoint = ord(description)
+        else:
+            continue
+        if codepoint > 0x10FFFF or 0xD800 <= codepoint <= 0xDFFF:
+            continue
+        character = json.dumps(chr(codepoint), ensure_ascii=False)
+        lines.append(f"    {{0x{codepoint:04X}, 0x{index:02X}, {character}}},")
+    lines.append("};")
+    return "\n".join(lines)
+
+
 def _wrap_sample_text(text: str, max_characters: int) -> list[str]:
     lines = []
     current_line = ""
@@ -105,8 +158,9 @@ class PixelFontEditor:
         self.root.iconphoto(True, self._icon_image)
         if sys.platform == "win32":
             self.root.iconbitmap(default=str(ASSET_DIR / "pixel_font_editor.ico"))
-        self.root.geometry("1380x780")
-        self.root.minsize(1260, 640)
+        window_size, min_window_size = _load_window_config(CONFIG_PATH)
+        self.root.geometry(f"{window_size[0]}x{window_size[1]}")
+        self.root.minsize(*min_window_size)
         self.root.configure(background="#e8ece6")
 
         self.width = 8
@@ -196,8 +250,11 @@ class PixelFontEditor:
             row=1, column=2, sticky="e", padx=(0, 6)
         )
         ttk.Button(export_area, text="Save", command=self._save).grid(
-            row=1, column=3, sticky="e"
+            row=1, column=3, sticky="e", padx=(0, 6)
         )
+        ttk.Button(
+            export_area, text="C_Struct", command=self._show_unicode_glyphs
+        ).grid(row=1, column=4, sticky="e")
 
         ttk.Separator(shell).grid(row=1, column=0, sticky="ew", pady=(0, 14))
 
@@ -220,6 +277,44 @@ class PixelFontEditor:
             style="Status.TLabel",
             anchor="w",
         ).grid(row=3, column=0, sticky="ew", pady=(14, 0))
+
+    def _show_unicode_glyphs(self) -> None:
+        output = _render_unicode_glyphs(self.glyphs)
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Unicode C Struct")
+        dialog.transient(self.root)
+        dialog.geometry("620x460")
+        dialog.grid_rowconfigure(0, weight=1)
+        dialog.grid_columnconfigure(0, weight=1)
+
+        text = tk.Text(dialog, wrap="none", font=("TkFixedFont", 10))
+        text.grid(row=0, column=0, sticky="nsew", padx=(12, 0), pady=12)
+        text.insert("1.0", output)
+        text.configure(state="disabled")
+        vertical_scroll = ttk.Scrollbar(dialog, orient="vertical", command=text.yview)
+        vertical_scroll.grid(row=0, column=1, sticky="ns", padx=(0, 12), pady=12)
+        horizontal_scroll = ttk.Scrollbar(dialog, orient="horizontal", command=text.xview)
+        horizontal_scroll.grid(row=1, column=0, sticky="ew", padx=(12, 0))
+        text.configure(
+            yscrollcommand=vertical_scroll.set,
+            xscrollcommand=horizontal_scroll.set,
+        )
+
+        buttons = ttk.Frame(dialog)
+        buttons.grid(row=2, column=0, columnspan=2, sticky="e", padx=12, pady=12)
+
+        def copy_output() -> None:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(output)
+            self.root.update()
+            self.status_var.set("Unicode glyph table copied to clipboard")
+
+        ttk.Button(buttons, text="Copy", command=copy_output).grid(
+            row=0, column=0, padx=(0, 6)
+        )
+        ttk.Button(buttons, text="Close", command=dialog.destroy).grid(
+            row=0, column=1
+        )
 
     def _build_glyph_panel(self, parent: ttk.Frame) -> None:
         panel = ttk.Frame(parent, style="Panel.TFrame", padding=14)

@@ -1,18 +1,47 @@
+import json
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 from pixel_font_editor.app import (
     PixelFontEditor,
     TEMPLATE_DIR,
+    _load_window_config,
     _glyph_index_for_character,
     _preview_pixel_scale,
+    _render_unicode_glyphs,
     _wrap_sample_text,
 )
 from pixel_font_editor.model import Glyph
 
 
 class AppFormatTests(unittest.TestCase):
+    def test_window_config_loads_dimensions(self):
+        with TemporaryDirectory() as directory:
+            config_path = Path(directory) / "config.json"
+            config_path.write_text(
+                json.dumps({"window": {
+                    "width": 1440,
+                    "height": 900,
+                    "min_width": 1200,
+                    "min_height": 700,
+                }}),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                _load_window_config(config_path), ((1440, 900), (1200, 700))
+            )
+
+    def test_missing_window_config_uses_defaults(self):
+        with TemporaryDirectory() as directory:
+            config_path = Path(directory) / "missing.json"
+
+            self.assertEqual(
+                _load_window_config(config_path), ((1380, 780), (1260, 640))
+            )
+
     def test_sample_wrap_keeps_words_intact(self):
         self.assertEqual(
             _wrap_sample_text("the quick brown fox", 10),
@@ -44,6 +73,20 @@ class AppFormatTests(unittest.TestCase):
         )
         self.assertIsNone(
             _glyph_index_for_character(u8g2_glyphs, "B", "U8g2 font")
+        )
+
+    def test_unicode_glyph_table_uses_descriptions_and_array_positions(self):
+        glyphs = [Glyph(1, 1) for _ in range(0x82)]
+        glyphs[0x7F].description = "U+2192 should be excluded"
+        glyphs[0x80].description = "↓"
+        glyphs[0x81].description = "U+2191 1x1 x0 y0 advance1"
+
+        self.assertEqual(
+            _render_unicode_glyphs(glyphs),
+            "const font_unicode_glyph_t font_unicode_glyphs[] = {\n"
+            '    {0x2193, 0x80, "↓"},\n'
+            '    {0x2191, 0x81, "↑"},\n'
+            "};",
         )
 
     def test_new_loads_the_starter_for_the_selected_format(self):
