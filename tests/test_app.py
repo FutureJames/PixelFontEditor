@@ -128,6 +128,54 @@ class AppFormatTests(unittest.TestCase):
         editor.name_var.set.assert_called_once_with("font_8x10")
         editor._refresh.assert_called_once_with()
 
+    def test_move_glyph_reorders_and_keeps_moved_glyph_selected(self):
+        editor = PixelFontEditor.__new__(PixelFontEditor)
+        first, second, third = (Glyph(1, 1) for _ in range(3))
+        editor.glyphs = [first, second, third]
+        editor.selected_index = 1
+        editor._refresh = Mock()
+
+        editor._move_glyph(1)
+
+        self.assertIs(editor.glyphs[0], first)
+        self.assertIs(editor.glyphs[1], third)
+        self.assertIs(editor.glyphs[2], second)
+        self.assertEqual(editor.selected_index, 2)
+        editor._refresh.assert_called_once_with()
+
+        editor._move_glyph(1)
+
+        self.assertIs(editor.glyphs[0], first)
+        self.assertIs(editor.glyphs[1], third)
+        self.assertIs(editor.glyphs[2], second)
+        self.assertEqual(editor.selected_index, 2)
+        editor._refresh.assert_called_once_with()
+
+        editor._move_glyph(-1)
+
+        self.assertIs(editor.glyphs[0], first)
+        self.assertIs(editor.glyphs[1], second)
+        self.assertIs(editor.glyphs[2], third)
+        self.assertEqual(editor.selected_index, 1)
+        self.assertEqual(editor._refresh.call_count, 2)
+
+    def test_select_glyph_refreshes_move_button_states(self):
+        editor = PixelFontEditor.__new__(PixelFontEditor)
+        editor.glyphs = [Glyph(1, 1) for _ in range(3)]
+        editor.selected_index = 2
+        editor.glyph_list = Mock()
+        editor.move_up_button = Mock()
+        editor.move_down_button = Mock()
+        editor._refresh = Mock()
+
+        editor.glyph_list.curselection.return_value = (0,)
+        editor._select_glyph()
+
+        editor.move_up_button.configure.assert_called_once_with(state="disabled")
+        editor.move_down_button.configure.assert_called_once_with(state="normal")
+        self.assertEqual(editor.selected_index, 0)
+        editor._refresh.assert_called_once_with(refresh_glyph_list=False)
+
     def test_save_cannot_overwrite_a_bundled_starter(self):
         editor = PixelFontEditor.__new__(PixelFontEditor)
         editor.root = Mock()

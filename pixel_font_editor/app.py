@@ -364,6 +364,14 @@ class PixelFontEditor:
         ttk.Button(actions, text="Remove", command=self._remove_glyph).grid(
             row=1, column=0, columnspan=2, sticky="ew", pady=(6, 0)
         )
+        self.move_up_button = ttk.Button(
+            actions, text="Up", command=lambda: self._move_glyph(-1)
+        )
+        self.move_up_button.grid(row=2, column=0, sticky="ew", pady=(6, 0), padx=(0, 3))
+        self.move_down_button = ttk.Button(
+            actions, text="Down", command=lambda: self._move_glyph(1)
+        )
+        self.move_down_button.grid(row=2, column=1, sticky="ew", pady=(6, 0), padx=(3, 0))
 
     def _build_grid_panel(self, parent: ttk.Frame) -> None:
         panel = ttk.Frame(parent, style="Panel.TFrame", padding=14)
@@ -624,6 +632,19 @@ class PixelFontEditor:
         self.glyph_list.selection_set(self.selected_index)
         self.glyph_list.activate(self.selected_index)
         self.glyph_list.see(self.selected_index)
+        self._refresh_glyph_move_buttons()
+
+    def _refresh_glyph_move_buttons(self) -> None:
+        self.move_up_button.configure(
+            state=tk.NORMAL if self.selected_index > 0 else tk.DISABLED
+        )
+        self.move_down_button.configure(
+            state=(
+                tk.NORMAL
+                if self.selected_index < len(self.glyphs) - 1
+                else tk.DISABLED
+            )
+        )
 
     def _draw_grid(self) -> None:
         cell = min(42, max(16, 520 // max(self.width, self.height)))
@@ -903,6 +924,7 @@ class PixelFontEditor:
         selection = self.glyph_list.curselection()
         if selection:
             self.selected_index = selection[0]
+            self._refresh_glyph_move_buttons()
             self._refresh(refresh_glyph_list=False)
 
     def _select_atlas_glyph(self, event: tk.Event) -> None:
@@ -938,6 +960,17 @@ class PixelFontEditor:
         )
         self.glyphs.insert(self.selected_index + 1, duplicate)
         self.selected_index += 1
+        self._refresh()
+
+    def _move_glyph(self, offset: int) -> None:
+        target_index = self.selected_index + offset
+        if not 0 <= target_index < len(self.glyphs):
+            return
+        self.glyphs[self.selected_index], self.glyphs[target_index] = (
+            self.glyphs[target_index],
+            self.glyphs[self.selected_index],
+        )
+        self.selected_index = target_index
         self._refresh()
 
     def _remove_glyph(self) -> None:
