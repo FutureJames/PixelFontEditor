@@ -14,6 +14,8 @@ class Glyph:
     height: int
     rows: list[int] | None = None
     description: str = ""
+    codepoint: int | None = None
+    u8g2_data: str = ""
 
     def __post_init__(self) -> None:
         if not 1 <= self.width <= MAX_DIMENSION:
@@ -26,6 +28,11 @@ class Glyph:
             raise ValueError("row count must match glyph height")
         elif any(row < 0 or row >= (1 << self.width) for row in self.rows):
             raise ValueError("row contains pixels outside glyph width")
+        if self.codepoint is not None and (
+            not 0 <= self.codepoint <= 0x10FFFF
+            or 0xD800 <= self.codepoint <= 0xDFFF
+        ):
+            raise ValueError("codepoint must be a valid Unicode scalar value")
 
     def is_pixel_on(self, x: int, y: int) -> bool:
         self._check_coordinates(x, y)

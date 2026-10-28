@@ -9,6 +9,9 @@ U8G2_DESCRIPTION = re.compile(
     r"^U\+([0-9A-Fa-f]{4,6})\s+(\d+)x(\d+)\s+"
     r"x(-?\d+)\s+y(-?\d+)\s+advance(-?\d+)$"
 )
+U8G2_DATA = re.compile(
+    r"^(\d+)x(\d+)\s+x(-?\d+)\s+y(-?\d+)\s+advance(-?\d+)$"
+)
 
 
 class _BitWriter:
@@ -72,20 +75,45 @@ def _escape_c_string_byte(value: int, next_value: int | None = None) -> str:
 
 
 def _source_records(glyphs: list[Glyph]) -> list[tuple[int, int, int, int, int, int, list[int]]]:
-    parsed = [U8G2_DESCRIPTION.fullmatch(glyph.description) for glyph in glyphs]
-    preserve_metadata = bool(glyphs) and all(match is not None for match in parsed)
+    parsed = [
+        (
+            U8G2_DATA.fullmatch(glyph.u8g2_data),
+            U8G2_DESCRIPTION.fullmatch(glyph.description),
+        )
+        for glyph in glyphs
+    ]
+    preserve_metadata = bool(glyphs) and all(
+        data_match is not None or description_match is not None
+        for data_match, description_match in parsed
+    )
     records = []
 
-    for index, (glyph, match) in enumerate(zip(glyphs, parsed)):
+    for index, (glyph, (data_match, description_match)) in enumerate(
+        zip(glyphs, parsed)
+    ):
         glyph_rows = glyph.rows if glyph.rows is not None else [0] * glyph.height
         if preserve_metadata:
-            # Parse the hexadecimal code point separately from decimal metrics.
-            codepoint = int(match.group(1), 16)  # type: ignore[union-attr]
-            source_width = int(match.group(2))  # type: ignore[union-attr]
-            source_height = int(match.group(3))  # type: ignore[union-attr]
-            x_offset = int(match.group(4))  # type: ignore[union-attr]
-            y_offset = int(match.group(5))  # type: ignore[union-attr]
-            advance = int(match.group(6))  # type: ignore[union-attr]
+            if data_match is not None:
+                codepoint = glyph.codepoint
+                if codepoint is None:
+                    codepoint = (
+                        ord(glyph.description)
+                        if len(glyph.description) == 1
+                        else index + 32
+                    )
+                source_width = int(data_match.group(1))
+                source_height = int(data_match.group(2))
+                x_offset = int(data_match.group(3))
+                y_offset = int(data_match.group(4))
+                advance = int(data_match.group(5))
+            else:
+                # Legacy glyphs store the code point and metrics in description.
+                codepoint = int(description_match.group(1), 16)  # type: ignore[union-attr]
+                source_width = int(description_match.group(2))  # type: ignore[union-attr]
+                source_height = int(description_match.group(3))  # type: ignore[union-attr]
+                x_offset = int(description_match.group(4))  # type: ignore[union-attr]
+                y_offset = int(description_match.group(5))  # type: ignore[union-attr]
+                advance = int(description_match.group(6))  # type: ignore[union-attr]
             width = min(source_width, glyph.width)
             height = min(source_height, glyph.height)
             for y in range(glyph.height):
@@ -94,7 +122,7 @@ def _source_records(glyphs: list[Glyph]) -> list[tuple[int, int, int, int, int, 
                         width = max(width, x + 1)
                         height = max(height, y + 1)
         else:
-            codepoint = index + 32
+            codepoint = glyph.codepoint if glyph.codepoint is not None else index + 32
             width, height = glyph.width, glyph.height
             x_offset, y_offset, advance = 0, 0, width
 

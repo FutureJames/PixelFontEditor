@@ -34,7 +34,9 @@ class U8g2ImportTests(unittest.TestCase):
                 ],
             ),
         )
-        self.assertEqual(glyphs[0].description, "U+0041 7x5 x0 y0 advance9")
+        self.assertEqual(glyphs[0].description, "A")
+        self.assertEqual(glyphs[0].codepoint, 0x41)
+        self.assertEqual(glyphs[0].u8g2_data, "7x5 x0 y0 advance9")
         self.assertTrue(all((glyph.width, glyph.height) == (9, 6) for glyph in glyphs))
         self.assertTrue(all(glyph.width <= 32 and glyph.height <= 32 for glyph in glyphs))
 
@@ -54,12 +56,15 @@ class U8g2ImportTests(unittest.TestCase):
 
         self.assertEqual(name, "u8g2_font_5x8_mr")
         self.assertEqual(len(glyphs), 95)
-        self.assertEqual(glyphs[0].description, "U+0020 5x8 x0 y-1 advance5")
+        self.assertEqual(glyphs[0].description, " ")
+        self.assertEqual(glyphs[0].codepoint, 0x20)
+        self.assertEqual(glyphs[0].u8g2_data, "5x8 x0 y-1 advance5")
         self.assertEqual(glyphs[0].rows, [0] * 8)
-        self.assertEqual(glyphs[0x10].description[:7], "U+0030 ")
-        self.assertEqual(glyphs[0x13].description[:7], "U+0033 ")
-        self.assertEqual(glyphs[0x14].description[:7], "U+0034 ")
-        self.assertEqual(glyphs[0x15].description[:7], "U+0035 ")
+        self.assertEqual(glyphs[0x10].description, "0")
+        self.assertEqual(glyphs[0x10].codepoint, 0x30)
+        self.assertEqual(glyphs[0x13].codepoint, 0x33)
+        self.assertEqual(glyphs[0x14].codepoint, 0x34)
+        self.assertEqual(glyphs[0x15].codepoint, 0x35)
 
     def test_import_caches_font_rle_widths(self):
         sample_path = Path(__file__).parents[1] / "sample_files" / "u8g2_font_5x8_mr.c"
@@ -130,8 +135,8 @@ class U8g2ImportTests(unittest.TestCase):
 
     def test_round_trips_extended_unicode_glyphs(self):
         glyphs = [
-            Glyph(2, 2, [0b10, 0b01], "U+0041 2x2 x-1 y0 advance3"),
-            Glyph(2, 2, [0b11, 0b10], "U+0100 2x2 x0 y-1 advance2"),
+            Glyph(2, 2, [0b10, 0b01], "A", 0x41, "2x2 x-1 y0 advance3"),
+            Glyph(2, 2, [0b11, 0b10], "Ā", 0x100, "2x2 x0 y-1 advance2"),
         ]
 
         exported = render_u8g2_font("unicode_font", glyphs)
@@ -140,8 +145,14 @@ class U8g2ImportTests(unittest.TestCase):
         self.assertIn('U8G2_FONT_SECTION("unicode_font")', exported)
         self.assertEqual(name, "unicode_font")
         self.assertEqual(
-            [(glyph.description, glyph.rows) for glyph in imported],
-            [(glyph.description, glyph.rows) for glyph in glyphs],
+            [
+                (glyph.description, glyph.codepoint, glyph.u8g2_data, glyph.rows)
+                for glyph in imported
+            ],
+            [
+                (glyph.description, glyph.codepoint, glyph.u8g2_data, glyph.rows)
+                for glyph in glyphs
+            ],
         )
 
     def test_assigns_printable_code_points_to_editor_glyphs(self):
@@ -149,7 +160,9 @@ class U8g2ImportTests(unittest.TestCase):
 
         _, imported = parse_u8g2_font(render_u8g2_font("font", glyphs))
 
-        self.assertEqual(imported[0].description, "U+0020 2x2 x0 y0 advance2")
+        self.assertEqual(imported[0].description, " ")
+        self.assertEqual(imported[0].codepoint, 0x20)
+        self.assertEqual(imported[0].u8g2_data, "2x2 x0 y0 advance2")
         self.assertEqual(imported[0].rows, glyphs[0].rows)
 
 

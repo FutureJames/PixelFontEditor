@@ -151,11 +151,15 @@ def _decode_glyph(
                 row |= 1 << (width - 1 - column)
         rows.append(row)
 
-    description = (
-        f"U+{codepoint:04X} {width}x{height} "
-        f"x{x_offset} y{y_offset} advance{advance}"
+    u8g2_data = f"{width}x{height} x{x_offset} y{y_offset} advance{advance}"
+    return Glyph(
+        max(width, 1),
+        max(height, 1),
+        rows if width and height else None,
+        chr(codepoint),
+        codepoint,
+        u8g2_data,
     )
-    return Glyph(max(width, 1), max(height, 1), rows if width and height else None, description)
 
 
 def _decode_byte_glyphs(data: bytes, header: bytes) -> list[Glyph]:

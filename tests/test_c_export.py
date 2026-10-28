@@ -25,6 +25,67 @@ class CExportTests(unittest.TestCase):
             "    }};\n",
         )
 
+    def test_includes_explicit_codepoint_with_description_in_glyph_comment(self):
+        result = render_c_font(
+            "font_demo",
+            [Glyph(1, 1, description="A")],
+            glyph_codepoints={0: 0x41},
+        )
+
+        self.assertIn("// 0x00 A U+0041", result)
+
+    def test_does_not_duplicate_codepoint_already_in_description(self):
+        result = render_c_font(
+            "font_demo",
+            [Glyph(1, 1, description="U+0041 5x8 x0 y-1 advance5")],
+            glyph_codepoints={0: 0x41},
+        )
+
+        self.assertIn("// 0x00 A U+0041 5x8 x0 y-1 advance5", result)
+        self.assertNotIn("U+0041 U+0041", result)
+
+    def test_orders_existing_unicode_character_before_codepoint(self):
+        result = render_c_font(
+            "font_demo",
+            [Glyph(1, 1, description="U+2297 ⊗")],
+            glyph_codepoints={0: 0x2297},
+        )
+
+        self.assertIn("// 0x00 ⊗ U+2297", result)
+
+    def test_import_splits_character_first_codepoint_comment(self):
+        source = render_c_font(
+            "font_demo",
+            [Glyph(1, 1, description="⊗", codepoint=0x2297)],
+        )
+
+        _, glyphs = parse_c_font(source)
+
+        self.assertEqual(glyphs[0].description, "⊗")
+        self.assertEqual(glyphs[0].codepoint, 0x2297)
+
+    def test_import_splits_legacy_codepoint_first_comment(self):
+        source = render_c_font(
+            "font_demo", [Glyph(1, 1, description="⊗ U+2297")]
+        ).replace("⊗ U+2297", "U+2297 ⊗")
+
+        _, glyphs = parse_c_font(source)
+
+        self.assertEqual(glyphs[0].description, "⊗")
+        self.assertEqual(glyphs[0].codepoint, 0x2297)
+
+    def test_extended_font_import_preserves_character_and_codepoint(self):
+        sample_path = Path(__file__).parents[1] / "sample_files" / "font_8x10_extended.c"
+        source = sample_path.read_text(encoding="utf-8")
+
+        _, glyphs = parse_c_font(source)
+        exported = render_c_font("font_demo", glyphs)
+
+        self.assertEqual(glyphs[0x86].description, "⊗")
+        self.assertEqual(glyphs[0x86].codepoint, 0x2297)
+        self.assertEqual(glyphs[0x86].u8g2_data, "")
+        self.assertIn("// 0x86 ⊗ U+2297", exported)
+
     def test_sanitizes_c_identifier(self):
         result = render_c_font("8x10 display", [Glyph(1, 1)])
 

@@ -8,6 +8,27 @@ from pixel_font_editor.model import Glyph
 FONT_DECLARATION = re.compile(
     r"\bconst\s+font_t\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\{"
 )
+UNICODE_COMMENT = re.compile(r"(?<!\S)U\+([0-9A-Fa-f]{1,6})(?!\S)")
+
+
+def _parse_glyph_comment(comment: str) -> tuple[str, int | None]:
+    match = UNICODE_COMMENT.search(comment)
+    if match is None:
+        return comment, None
+
+    codepoint = int(match.group(1), 16)
+    if codepoint > 0x10FFFF or 0xD800 <= codepoint <= 0xDFFF:
+        return comment, None
+
+    before = comment[: match.start()].strip()
+    after = comment[match.end() :].strip()
+    if len(before) == 1:
+        return " ".join(part for part in (before, after) if part), codepoint
+
+    character, separator, details = after.partition(" ")
+    if len(character) == 1:
+        return " ".join(part for part in (character, details) if part), codepoint
+    return comment, codepoint
 
 
 def extract_c_header(source: str) -> str:
@@ -18,7 +39,12 @@ def extract_c_header(source: str) -> str:
     return source[: declaration.start()]
 
 
-def render_c_font(name: str, glyphs: list[Glyph], header: str = "") -> str:
+def render_c_font(
+    name: str,
+    glyphs: list[Glyph],
+    header: str = "",
+    glyph_codepoints: dict[int, int] | None = None,
+) -> str:
     """Render glyphs in the font_t initializer format."""
     identifier = re.sub(r"\W", "_", name)
     if not identifier or identifier[0].isdigit():
@@ -38,6 +64,23 @@ def render_c_font(name: str, glyphs: list[Glyph], header: str = "") -> str:
     ]
     for index, glyph in enumerate(glyphs):
         description = " ".join(glyph.description.split())
+        codepoint = (glyph_codepoints or {}).get(index, glyph.codepoint)
+        if codepoint is not None:
+            if codepoint > 0x10FFFF or 0xD800 <= codepoint <= 0xDFFF:
+                raise ValueError(f"invalid Unicode codepoint: U+{codepoint:04X}")
+            codepoint_label = f"U+{codepoint:04X}"
+            match = re.match(r"^U\+([0-9A-Fa-f]{1,6})(?:\s|$)", description)
+            if match is not None and int(match.group(1), 16) == codepoint:
+                description = description[match.end() :].strip()
+                first_word, _, details = description.partition(" ")
+                if len(first_word) != 1:
+                    details = description
+                    first_word = chr(codepoint)
+                description = f"{first_word} {codepoint_label} {details}".rstrip()
+            elif len(description) == 1:
+                description = f"{description} {codepoint_label}"
+            else:
+                description = f"{chr(codepoint)} {codepoint_label} {description}".rstrip()
         suffix = f" {description}" if description else ""
         lines.append(f"        // 0x{index:02X}{suffix}")
         lines.extend(f"        0b{row:0{width}b}," for row in glyph.rows) # type: ignore
@@ -71,6 +114,7 @@ def parse_c_font(source: str) -> tuple[str, list[Glyph]]:
 
     glyph_rows: list[list[int]] = []
     glyph_descriptions: list[str] = []
+    glyph_codepoints: list[int | None] = []
     current_index: int | None = None
     current_rows: list[int] = []
     current_description = ""
@@ -91,7 +135,9 @@ def parse_c_font(source: str) -> tuple[str, list[Glyph]]:
         if not current_rows:
             raise ValueError(f"glyph 0x{current_index:02X} has no rows")
         glyph_rows.append(current_rows.copy())
-        glyph_descriptions.append(current_description)
+        description, codepoint = _parse_glyph_comment(current_description)
+        glyph_descriptions.append(description)
+        glyph_codepoints.append(codepoint)
 
     for raw_line in initializer[glyphs_match.end() :].splitlines():
         line = raw_line.strip()
@@ -127,8 +173,10 @@ def parse_c_font(source: str) -> tuple[str, list[Glyph]]:
 
     try:
         glyphs = [
-            Glyph(width, len(rows), rows, description)
-            for rows, description in zip(glyph_rows, glyph_descriptions)
+            Glyph(width, len(rows), rows, description, codepoint)
+            for rows, description, codepoint in zip(
+                glyph_rows, glyph_descriptions, glyph_codepoints
+            )
         ]
     except ValueError as error:
         raise ValueError(f"invalid glyph dimensions: {error}") from error

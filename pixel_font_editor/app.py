@@ -5,6 +5,7 @@ import json
 import re
 import sys
 import tkinter as tk
+import unicodedata
 from tkinter import filedialog, messagebox, ttk
 
 from pixel_font_editor.c_export import extract_c_header, parse_c_font, render_c_font
@@ -30,6 +31,26 @@ DEFAULT_WINDOW_SIZE = (1380, 780)
 DEFAULT_MIN_WINDOW_SIZE = (1260, 640)
 SAMPLE_TEXT = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation."
 UNICODE_CODEPOINT = re.compile(r"^U\+([0-9A-Fa-f]{1,6})(?:\s|$)")
+CODEPOINT_INPUT = re.compile(r"^(?:U\+|0[xX])?([0-9A-Fa-f]{1,6})$")
+
+
+def _parse_codepoint(value: str) -> int | None:
+    match = CODEPOINT_INPUT.fullmatch(value.strip())
+    if match is None:
+        return None
+    codepoint = int(match.group(1), 16)
+    if codepoint > 0x10FFFF or 0xD800 <= codepoint <= 0xDFFF:
+        return None
+    return codepoint
+
+
+def _description_codepoint(description: str) -> int | None:
+    match = UNICODE_CODEPOINT.match(description.strip())
+    if match is not None:
+        return _parse_codepoint(match.group(1))
+    if len(description) == 1:
+        return ord(description)
+    return None
 
 
 def _load_window_config(config_path: Path) -> tuple[tuple[int, int], tuple[int, int]]:
@@ -82,21 +103,14 @@ def _glyph_index_for_character(
     glyphs: list[Glyph], character: str, font_format: str
 ) -> int | None:
     codepoint = ord(character)
+    for index, glyph in enumerate(glyphs):
+        glyph_codepoint = glyph.codepoint
+        if glyph_codepoint is None:
+            glyph_codepoint = _description_codepoint(glyph.description)
+        if glyph_codepoint == codepoint:
+            return index
     if font_format != "U8g2 font":
         return codepoint if codepoint < len(glyphs) else None
-
-    for index, glyph in enumerate(glyphs):
-        description_parts = glyph.description.split(maxsplit=1)
-        if not description_parts:
-            continue
-        codepoint_text = description_parts[0]
-        if not codepoint_text.startswith("U+"):
-            continue
-        try:
-            if int(codepoint_text[2:], 16) == codepoint:
-                return index
-        except ValueError:
-            continue
     return None
 
 
@@ -104,12 +118,10 @@ def _render_unicode_glyphs(glyphs: list[Glyph]) -> str:
     lines = ["const font_unicode_glyph_t font_unicode_glyphs[] = {"]
     for index, glyph in enumerate(glyphs[0x80:], start=0x80):
         description = glyph.description.strip()
-        match = UNICODE_CODEPOINT.match(description)
-        if match is not None:
-            codepoint = int(match.group(1), 16)
-        elif len(description) == 1:
-            codepoint = ord(description)
-        else:
+        codepoint = glyph.codepoint
+        if codepoint is None:
+            codepoint = _description_codepoint(description)
+        if codepoint is None:
             continue
         if codepoint > 0x10FFFF or 0xD800 <= codepoint <= 0xDFFF:
             continue
@@ -174,7 +186,11 @@ class PixelFontEditor:
         self.width_var = tk.IntVar(value=self.width)
         self.height_var = tk.IntVar(value=self.height)
         self.glyph_description_var = tk.StringVar()
+        self.glyph_codepoint_var = tk.StringVar()
+        self.glyph_unicode_name_var = tk.StringVar()
+        self.glyph_u8g2_data_var = tk.StringVar()
         self._syncing_glyph_description = False
+        self._syncing_glyph_codepoint = False
         self._paint_value: bool | None = None
         self._last_painted_cell: tuple[int, int] | None = None
         self.preview_zoom = tk.DoubleVar(value=0.3)
@@ -185,6 +201,7 @@ class PixelFontEditor:
         self._configure_styles()
         self._build_layout()
         self.glyph_description_var.trace_add("write", self._description_changed)
+        self.glyph_codepoint_var.trace_add("write", self._codepoint_changed)
         self.sample_text_var.trace_add("write", self._sample_text_changed)
         self._refresh()
 
@@ -414,12 +431,36 @@ class PixelFontEditor:
         glyph_info = ttk.Frame(panel, style="Panel.TFrame")
         glyph_info.grid(row=1, column=0, sticky="ew", pady=(10, 0))
         glyph_info.grid_columnconfigure(1, weight=1)
-        ttk.Label(glyph_info, text="DESCRIPTION", style="Eyebrow.TLabel").grid(
-            row=0, column=0, sticky="w", padx=(0, 5)
+        ttk.Label(glyph_info, text="CHARACTER", style="Eyebrow.TLabel").grid(
+            row=0, column=0, sticky="w", padx=(0, 8), pady=(0, 4)
         )
         ttk.Entry(glyph_info, textvariable=self.glyph_description_var).grid(
-            row=0, column=1, sticky="ew"
+            row=0, column=1, sticky="ew", pady=(0, 4)
         )
+        ttk.Label(glyph_info, text="CODE POINT", style="Eyebrow.TLabel").grid(
+            row=1, column=0, sticky="w", padx=(0, 8), pady=(0, 4)
+        )
+        ttk.Entry(
+            glyph_info, textvariable=self.glyph_codepoint_var, width=10
+        ).grid(row=1, column=1, sticky="ew", pady=(0, 4))
+        ttk.Label(glyph_info, text="UNICODE NAME", style="Eyebrow.TLabel").grid(
+            row=2, column=0, sticky="w", padx=(0, 8)
+        )
+        ttk.Entry(
+            glyph_info,
+            textvariable=self.glyph_unicode_name_var,
+            width=24,
+            state="readonly",
+        ).grid(row=2, column=1, sticky="ew")
+        ttk.Label(glyph_info, text="U8G2 DATA", style="Eyebrow.TLabel").grid(
+            row=3, column=0, sticky="w", padx=(0, 8), pady=(4, 0)
+        )
+        ttk.Entry(
+            glyph_info,
+            textvariable=self.glyph_u8g2_data_var,
+            width=30,
+            state="readonly",
+        ).grid(row=3, column=1, sticky="ew", pady=(4, 0))
 
         ttk.Label(
             panel,
@@ -594,6 +635,11 @@ class PixelFontEditor:
         self._syncing_glyph_description = True
         self.glyph_description_var.set(self.selected_glyph.description)
         self._syncing_glyph_description = False
+        self.glyph_u8g2_data_var.set(self.selected_glyph.u8g2_data)
+        codepoint = self.selected_glyph.codepoint
+        if codepoint is None:
+            codepoint = _description_codepoint(self.selected_glyph.description)
+        self._set_glyph_codepoint(codepoint)
         self._draw_grid()
         self._draw_preview()
         self._draw_sample_text()
@@ -613,12 +659,40 @@ class PixelFontEditor:
             return
 
         glyph.description = description
+        codepoint = _description_codepoint(description)
+        glyph.codepoint = codepoint
+        self._set_glyph_codepoint(codepoint)
         self.glyph_list.delete(self.selected_index)
         self.glyph_list.insert(self.selected_index, self._glyph_list_label(self.selected_index))
         self.glyph_list.selection_set(self.selected_index)
         self.glyph_list.activate(self.selected_index)
         self.glyph_list.see(self.selected_index)
         self._draw_sample_text()
+
+    def _set_glyph_codepoint(self, codepoint: int | None) -> None:
+        self._syncing_glyph_codepoint = True
+        self.glyph_codepoint_var.set(
+            f"U+{codepoint:04X}" if codepoint is not None else ""
+        )
+        self._syncing_glyph_codepoint = False
+        self.glyph_unicode_name_var.set(
+            unicodedata.name(chr(codepoint), "UNNAMED CHARACTER")
+            if codepoint is not None
+            else ""
+        )
+
+    def _codepoint_changed(self, *_args: str) -> None:
+        if self._syncing_glyph_codepoint or not self.glyphs:
+            return
+        codepoint = _parse_codepoint(self.glyph_codepoint_var.get())
+        self.glyph_unicode_name_var.set(
+            unicodedata.name(chr(codepoint), "UNNAMED CHARACTER")
+            if codepoint is not None
+            else ""
+        )
+        if codepoint is not None and not self.selected_glyph.description:
+            self.glyph_description_var.set(chr(codepoint))
+        self.selected_glyph.codepoint = codepoint
 
     def _glyph_list_label(self, index: int) -> str:
         description = " ".join(self.glyphs[index].description.split())
@@ -957,6 +1031,8 @@ class PixelFontEditor:
             self.height,
             self.selected_glyph.rows.copy(), # type: ignore
             self.selected_glyph.description,
+            self.selected_glyph.codepoint,
+            self.selected_glyph.u8g2_data,
         )
         self.glyphs.insert(self.selected_index + 1, duplicate)
         self.selected_index += 1
@@ -1153,10 +1229,23 @@ class PixelFontEditor:
                     source_header=self.file_header,
                 )
             else:
+                glyph_codepoints = {}
+                for index, glyph in enumerate(self.glyphs):
+                    codepoint = glyph.codepoint
+                    if codepoint is None:
+                        codepoint = _description_codepoint(glyph.description)
+                    if codepoint is not None:
+                        glyph_codepoints[index] = codepoint
+                selected_codepoint = _parse_codepoint(
+                    self.glyph_codepoint_var.get()
+                )
+                if selected_codepoint is not None:
+                    glyph_codepoints[self.selected_index] = selected_codepoint
                 output = render_c_font(
                     suggested_name,
                     self.glyphs,
                     header=self.file_header,
+                    glyph_codepoints=glyph_codepoints,
                 )
             with open(path, "w", encoding="utf-8", newline="\n") as file:
                 file.write(output)
